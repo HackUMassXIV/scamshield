@@ -1,0 +1,9 @@
+# Cloud service only (Vultr image: deploy/Dockerfile.cloud)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+httpx>=0.27
+numpy>=1.26
+python-dotenv>=1.0
+pymongo>=4.7          # MongoDB Atlas store when MONGODB_URI is set
+pywebpush>=2.0        # Web Push (optional; needs VAPID keys)

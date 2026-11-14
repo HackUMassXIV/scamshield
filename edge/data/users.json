@@ -1,0 +1,19 @@
+{
+  "_comment": "Maps a student's phone (the caller-ID of the Guardian leg after they Merge) to a user. Replace the placeholder 555 numbers with real, consenting teammates' numbers. E.164 or 10-digit US numbers are both accepted. The file hot-reloads.",
+  "users": [
+    {
+      "id": "alex",
+      "name": "Alex Chen",
+      "phone": "+14135550101",
+      "trusted_contact": "+14135550102",
+      "aliases": ["Alex"]
+    },
+    {
+      "id": "sam",
+      "name": "Sam Rivera",
+      "phone": "+14135550103",
+      "trusted_contact": null,
+      "aliases": ["Sam"]
+    }
+  ]
+}

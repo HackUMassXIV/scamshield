@@ -1,0 +1,7 @@
+# Optional: DistilBERT training/inference and Hugging Face datasets.
+# The TF-IDF model needs only requirements.txt. Train DistilBERT on Colab (ml/train_distilbert.py),
+# then install this on the laptop so the edge can load models/clf.
+transformers>=4.40
+torch>=2.2
+datasets>=2.19
+accelerate>=0.30

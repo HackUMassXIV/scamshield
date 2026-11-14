@@ -1,0 +1,91 @@
+---
+description: ScamShield project context: architecture, data contracts, privacy rules
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# ScamShield: scam payment firewall (HackUMass XIV)
+
+"ChatGPT can tell you it was a scam. We stop you from paying it."
+
+## Architecture
+- **edge/** (Python, FastAPI, runs on the demo laptop behind a tunnel). Twilio merge leg
+  → media websocket → VAD → faster-whisper → PII redaction → (later) classifier, risk
+  engine, local LLM, coaching. Raw audio and raw text never leave this process.
+- **cloud/** (Python, FastAPI, Vultr). Receives only redacted `RiskEvent`s. Shield state,
+  payment firewall in front of Capital One Nessie, holds in MongoDB Atlas, Gemini second
+  opinion, scam map.
+- **app/** (React + Vite PWA). `/guardian` (student), `/bank` (fictional bank),
+  `/ops` (judge view). Live transcript comes from edge `/ws/ui`; holds from cloud.
+- **ml/** classifier training (DistilBERT + TF-IDF baseline).
+
+## Call flow (merge mode)
+1. Student taps "Screen this call" → `tel:` Guardian number → taps **Merge**.
+2. `POST /twilio/voice` (signed) → look up `From` in `edge/data/users.json` → session →
+   answer with `<Pause>` only. **No audio is streamed before disclosure.**
+3. Student taps "Start screening" → `POST /api/screen/start` → `calls(sid).update(twiml)`:
+   `<Say>` disclosure, THEN `<Start><Stream track="inbound_track">` with
+   `<Parameter name="call_id">`.
+4. `WS /ws/twilio` binds the stream by the unguessable `call_id`.
+5. Each utterance → `TranscriptEvent` (redacted) → `/ws/ui` + `runtime.transcript_hooks`.
+
+## Data contracts (source of truth: shared/contracts.py)
+```python
+class RiskEvent(BaseModel):
+    call_id: str; user_id: str; ts: float
+    level: Literal["GREEN","YELLOW","RED"]; score: float      # 0-100
+    scam_type: str; red_flags: list[str] = []                 # redacted quotes
+    features: dict; coach: dict | None = None; latency: dict = {}
+    source: Literal["call","message","user_flag"] = "call"
+
+class Transfer(BaseModel): user_id: str; payee_id: str; amount: float; memo: str = ""
+
+class Hold(BaseModel):
+    id: str; transfer: Transfer; reasons: list[str]; points: float
+    status: Literal["HELD","RELEASED","CANCELLED","EXPIRED"]; created: float; release_after: float
+
+class TranscriptEvent(BaseModel):
+    call_id: str; user_id: str; speaker: Literal["mixed","caller","student"]
+    text: str; redactions: dict[str,int]; t_start: float; t_end: float; latency: dict
+```
+UI event types on `/ws/ui`: leg_connected, screening_requested, screening_started,
+transcript, risk, user_flag, coach, llm, summary, leg_timeout, call_ended.
+
+## Sections 7-8 (implemented)
+- `shared/labels.py` (8 labels), `shared/textnorm.py` normalize_for_clf: SAME at train + inference.
+- `ml/`: synth_templates -> dataset (redact -> normalize -> windows 1-3, split BY CALL) ->
+  train_baseline (TF-IDF+LR, benign vs scam weighted 50/50) / train_distilbert (Colab) ->
+  eval_calls (replays calls through edge/risk.CallRisk.step).
+- `edge/classifier.py` (hf > tfidf > keyword), `edge/keywords.py` (negation guard),
+  `edge/risk.py` raw_score + Shield + RiskService (a transcript hook), `edge/cloud_client.py`.
+- `cloud/`: shield.py (per-user state), firewall.py `evaluate()` (HOLD>=3, WARN>=1.5),
+  bank.py (FakeBank | NessieBank), main.py API + `/ws/cloud`.
+- UI events add `risk` and `user_flag`; cloud ws events: shield, hold_created,
+  hold_released, hold_cancelled, transfer_ok.
+
+## Sections 9-11 (implemented)
+- `app/` React 19 + Vite + Tailwind v4 PWA: /guardian, /bank (fictional "Quill Bank"), /ops.
+  Served by the edge from app/dist; the phone only talks to the edge (tunnel), which proxies
+  `/cloud/*` and `/cloud-ws` to the cloud and adds X-Cloud-Key server-side.
+- Live transcript/risk/coach come from the EDGE ws (/ws/ui); holds, shield, second opinion and
+  map reports from the CLOUD ws. Never route transcripts through the cloud.
+- `edge/coach.py` + `shared/playbook.json`: steps 1-3; fact always from the playbook.
+- `edge/llm.py`: Ollama, throttled 15 s, cancel in-flight, quotes must be substrings.
+- `edge/alerts.py`: SMS/WhatsApp, cooldowns, no transcript text in messages.
+- `cloud/gemini.py`, `/api/second-opinion` (display only), `cloud/reports.py` scam map,
+  `cloud/push.py` Web Push (optional VAPID).
+- Design tokens: fog #E8EDF2, ink #18222E, teal #0D5C6B, go #1E9E6A, wait #E0A100,
+  stop #D3263A; font Atkinson Hyperlegible; the Guardian screen background IS the signal.
+
+## Extension point (sections 12-13)
+Add `async def hook(session: CallSession, ev: dict) -> None` to
+`runtime.transcript_hooks`. Use `session.recent_text(3)` for the window. Never block:
+put heavy models in a thread executor.
+
+## Hard rules
+- Never write call audio to disk. Never log or send un-redacted text.
+- Every Twilio webhook must pass `X-Twilio-Signature` validation.
+- The color must never wait on the LLM. Keyword/classifier fallback always.
+- Coaching goes ONLY to the student (PWA/SMS/earbuds), never into the merged call.
+- Python 3.11+. Don't use `audioop` (removed in 3.13); use edge/audio/codec.py.
+- No Capital One branding on the fictional bank page.

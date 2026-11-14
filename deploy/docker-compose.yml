@@ -1,0 +1,25 @@
+# On the Vultr VM (Ubuntu + Docker):
+#   git clone <your repo> && cd scamshield
+#   (cd app && npm ci && npm run build)          # or build locally and copy app/dist
+#   cp .env.example .env   # set CLOUD_API_KEY, DOMAIN, MONGODB_URI, GEMINI_API_KEY, NESSIE_API_KEY ...
+#   docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+# Point your domain's A record at the VM first so Caddy can get the certificate.
+services:
+  cloud:
+    build: { context: .., dockerfile: deploy/Dockerfile.cloud }
+    env_file: ../.env
+    restart: unless-stopped
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      CLOUD_API_KEY: ${CLOUD_API_KEY}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../app/dist:/srv/app:ro
+      - caddy_data:/data
+    depends_on: [cloud]
+    restart: unless-stopped
+volumes:
+  caddy_data:

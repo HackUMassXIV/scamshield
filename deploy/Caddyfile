@@ -1,0 +1,29 @@
+# Vultr: Caddy serves the PWA over HTTPS (automatic certificates for your
+# GoDaddy domain) and proxies /cloud/* to the cloud API with the cloud key added
+# server-side, so the key never reaches the browser.
+#
+# The live call pipeline (edge) stays on the demo laptop. On a phone, set
+# Settings > Server addresses > Edge URL to the laptop's tunnel URL.
+{$DOMAIN:localhost} {
+	encode zstd gzip
+
+	handle_path /cloud/* {
+		reverse_proxy cloud:9000 {
+			header_up X-Cloud-Key {$CLOUD_API_KEY}
+		}
+	}
+	handle /cloud-ws* {
+		rewrite * /ws/cloud?{query}&key={$CLOUD_API_KEY}
+		reverse_proxy cloud:9000
+	}
+	# Demo-grade protection: uncomment and set a password hash (caddy hash-password)
+	# basicauth /* {
+	# 	judge $2a$14$replace-with-hash
+	# }
+	handle {
+		root * /srv/app
+		header /sw.js Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

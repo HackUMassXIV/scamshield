@@ -1,0 +1,43 @@
+{
+  "_comment": "Section 10 coaching. 3 escalating steps per scam type. The 'fact' line ALWAYS comes from here, never from the LLM. Step 3 is always the hang-up.",
+  "irs_gov": [
+    {"say": "Can I have your name and badge number? I'll call the IRS back myself.", "fact": "The IRS usually contacts you by mail first, and never demands gift cards, crypto or wire transfers."},
+    {"say": "I'm not paying anything over the phone.", "fact": "You can check what you really owe at irs.gov/account."},
+    {"say": "I'm hanging up now.", "fact": "Threats of arrest over unpaid taxes are a scam tactic.", "action": "HANG_UP"}
+  ],
+  "immigration_uscis": [
+    {"say": "I'll check this with my university's international office first.", "fact": "USCIS and ICE never ask for payment over the phone or in gift cards."},
+    {"say": "Please send me an official letter. I won't pay on this call.", "fact": "Check your case only at uscis.gov, or ask your international student office."},
+    {"say": "I'm hanging up now.", "fact": "Deportation threats with a same-day 'fee' are a common scam against international students.", "action": "HANG_UP"}
+  ],
+  "tech_support": [
+    {"say": "I didn't ask for support. I'll contact the company myself.", "fact": "Microsoft and Apple don't make unsolicited calls about viruses."},
+    {"say": "I won't install anything or log in to my bank while you're on the line.", "fact": "Remote-access apps let scammers see your screen and your accounts."},
+    {"say": "I'm hanging up now.", "fact": "If you already gave access, disconnect from Wi-Fi and change your passwords.", "action": "HANG_UP"}
+  ],
+  "rental_deposit": [
+    {"say": "I'd like to see the place in person before paying anything.", "fact": "Never pay a deposit for a place you haven't seen or a lease you haven't signed."},
+    {"say": "Can you send me the property manager's official contact?", "fact": "Requests for Zelle, wire or gift cards for a deposit are a red flag."},
+    {"say": "I'm going to pass on this one, thanks.", "fact": "Report fake listings to the site and to the campus scam map.", "action": "HANG_UP"}
+  ],
+  "fake_job_check": [
+    {"say": "I won't deposit a check and send money back.", "fact": "Real employers never send a check and ask you to return part of it."},
+    {"say": "Please email me the offer from a company address and I'll verify it.", "fact": "Fake checks can bounce days later, and you owe the bank the money."},
+    {"say": "I'm ending the call now.", "fact": "Check job offers with your career center before sending anything.", "action": "HANG_UP"}
+  ],
+  "family_emergency": [
+    {"say": "What's something only you and I would know?", "fact": "Scammers fake emergencies, and can clone a voice from short clips."},
+    {"say": "I'm going to call you back on your usual number.", "fact": "Bail, lawyers and hospitals don't take gift cards or crypto."},
+    {"say": "I'll call you right back.", "fact": "Call the person directly on a number you already know.", "action": "HANG_UP"}
+  ],
+  "bank_impersonation": [
+    {"say": "I'll call my bank back using the number on my card.", "fact": "Your bank will never ask for a one-time code, your PIN, or your password."},
+    {"say": "I won't share any codes or move my money.", "fact": "There is no such thing as a 'safe account'. That's where the scammer gets paid."},
+    {"say": "I'm hanging up and calling my bank directly.", "fact": "If you shared a code, call your bank's fraud line right away.", "action": "HANG_UP"}
+  ],
+  "generic": [
+    {"say": "Who exactly am I speaking with? I'll call you back on an official number.", "fact": "Real organizations are fine with you calling them back."},
+    {"say": "I don't make payments or share codes on calls I didn't make.", "fact": "Pressure, secrecy and unusual payment methods are signs of a scam."},
+    {"say": "I'm hanging up now.", "fact": "When in doubt, hang up and call back on a number you know.", "action": "HANG_UP"}
+  ]
+}

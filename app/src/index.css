@@ -1,0 +1,35 @@
+@import "tailwindcss";
+@import "@fontsource/atkinson-hyperlegible/400.css";
+@import "@fontsource/atkinson-hyperlegible/700.css";
+@import "leaflet/dist/leaflet.css";
+
+@theme {
+  --font-sans: "Atkinson Hyperlegible", system-ui, sans-serif;
+  --color-fog: #E8EDF2;
+  --color-ink: #18222E;
+  --color-ink-soft: #4A5869;
+  --color-line: #C9D3DD;
+  --color-teal: #0D5C6B;
+  --color-teal-deep: #08404B;
+  --color-go: #1E9E6A;
+  --color-wait: #E0A100;
+  --color-stop: #D3263A;
+}
+
+:root { color-scheme: light; }
+html, body, #root { min-height: 100%; }
+body { background: var(--color-fog); color: var(--color-ink); font-family: var(--font-sans); -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 3px solid var(--color-teal); outline-offset: 2px; }
+
+/* The one bold moment: during a call the whole Guardian screen becomes the signal. */
+.signal { transition: background-color 600ms ease; }
+.signal-GREEN { background: #DCEFE6; }
+.signal-YELLOW { background: #F7EBC4; }
+.signal-RED { background: #F6D3D7; }
+@keyframes pulse-ring { 0%, 100% { opacity: 1 } 50% { opacity: .55 } }
+.ring-RED .ring-arc { animation: pulse-ring 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .signal { transition: none; }
+  .ring-RED .ring-arc { animation: none; }
+}
+.leaflet-container { font-family: var(--font-sans); }
