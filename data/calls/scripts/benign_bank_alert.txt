@@ -1,0 +1,4 @@
+Hello, this is an automated fraud alert from your bank.
+We noticed a purchase of forty two dollars at a grocery store this morning.
+If you made this purchase, no action is needed.
+If you did not, please call the number on the back of your card. We will never ask for your PIN.

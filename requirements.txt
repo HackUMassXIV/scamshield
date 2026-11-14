@@ -1,0 +1,21 @@
+# --- core edge service (sections 5-6) --------------------------------------
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+python-multipart>=0.0.9      # Twilio webhooks are form-encoded
+python-dotenv>=1.0
+numpy>=1.26
+scipy>=1.11
+soundfile>=0.12
+httpx>=0.27
+websockets>=12.0
+twilio>=9.0
+scikit-learn>=1.4          # TF-IDF classifier (section 7) on the edge
+joblib>=1.3
+pymongo>=4.7               # MongoDB Atlas store (only used when MONGODB_URI is set)
+# --- speech ------------------------------------------------------------------
+faster-whisper>=1.0          # CTranslate2 Whisper; CPU int8 or CUDA fp16
+silero-vad>=5.1              # pulls torch; we fall back to an energy VAD if it is missing
+sounddevice>=0.4             # mic mode; needs PortAudio (brew install portaudio / apt install libportaudio2)
+# NOTE: no audioop / audioop-lts needed. edge/audio/codec.py implements G.711 mu-law in numpy,
+# so this runs on Python 3.13+ where audioop was removed.
