@@ -3,8 +3,8 @@
 - model: tfidf(word1-2 + char3-5) + logistic regression
 - train_windows: 30750
 - test_windows: 5424
-- train_seconds: 4.8
-- ms_per_window: 0.049
+- train_seconds: 5.8
+- ms_per_window: 0.064
 
 | variant | n | acc | macro F1 | ECE | scam recall | benign FPR | benign-urgent FPR |
 |---|---|---|---|---|---|---|---|

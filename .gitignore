@@ -14,3 +14,5 @@ data/ml/
 runs/
 cloud/data/nessie_ids.json
 app/dist/
+Claude outputs/
+/package-lock.json

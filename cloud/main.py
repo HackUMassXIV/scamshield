@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from pathlib import Path
 from collections import defaultdict
@@ -127,6 +128,10 @@ def create_cloud_app(settings: Optional[CloudSettings] = None, *, bank: Optional
         app.state.cs = CloudState(s, bank or make_bank(s), store or make_store(s.mongodb_uri, s.mongo_db), clock)
         if gemini is not None:
             app.state.cs.gemini = gemini
+        # Fresh demo on every start: remove the app's earlier Nessie transfers so the
+        # balance is back to the seeded $1,800. Set RESET_ON_START=0 to keep them.
+        if os.getenv("RESET_ON_START", "1") == "1" and hasattr(app.state.cs.bank, "reset"):
+            await app.state.cs.bank.reset()
         await sync_payees(app.state.cs)
         log.info("cloud ready: bank=%s store=%s cooldown=%ss gemini=%s push=%s", app.state.cs.bank.name,
                  app.state.cs.store.name, s.cooldown_sec, "on" if app.state.cs.gemini.enabled else "off",
@@ -151,6 +156,14 @@ def create_cloud_app(settings: Optional[CloudSettings] = None, *, bank: Optional
     def hold_view(h: Hold, now: float) -> dict:
         return {**h.model_dump(), "release_in": max(0, round(h.release_after - now))}
 
+    @app.post("/api/reset")
+    async def reset(request: Request):
+        """Demo reset without restarting: Nessie test transfers, shield state, flags."""
+        cs = auth(request)
+        deleted = await cs.bank.reset() if hasattr(cs.bank, "reset") else 0
+        cs.shield = ShieldStore(cs.clock)
+        return {"ok": True, "deleted": deleted}
+
     @app.get("/health")
     async def health(request: Request):
         cs = cs_of(request)
@@ -172,7 +185,7 @@ def create_cloud_app(settings: Optional[CloudSettings] = None, *, bank: Optional
     @app.post("/api/session-end")
     async def session_end(body: SessionEnd, request: Request):
         cs = auth(request)
-        st = cs.shield.end_session(body.user_id, body.call_id)
+        st = cs.shield.end_session(body.user_id, body.call_id, body.max_level)
         await cs.push(body.user_id, "shield", **st.public())
         return {"ok": True}
 
@@ -262,6 +275,7 @@ def create_cloud_app(settings: Optional[CloudSettings] = None, *, bank: Optional
     async def account(user_id: str, request: Request):
         cs = auth(request)
         try:
+            await cs.bank.spend_history(user_id)  # refresh history from Nessie (no-op for the fake bank)
             bal = await cs.bank.balance(user_id)
         except KeyError:
             raise HTTPException(404, "unknown user")

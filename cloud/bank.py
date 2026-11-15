@@ -13,11 +13,25 @@ a trusted payee.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional, Protocol
+
+log = logging.getLogger("cloud.bank")
+
+# Descriptions written by cloud/seed_nessie.py for the demo history. Any other
+# "to:" transfer on the student's account was made by this app (Nessie may change
+# a transfer's status after creation, so status can't be used to tell them apart).
+SEED_DESCRIPTIONS = {"to:landlord | October rent", "to:landlord | November rent",
+                     "to:bursar | parking permit", "to:roommate | groceries", "to:roommate | internet"}
+
+
+def is_app_transfer(row: dict) -> bool:
+    desc = str(row.get("description", "")).strip()
+    return desc.startswith("to:") and desc not in SEED_DESCRIPTIONS
 
 
 @dataclass
@@ -130,11 +144,18 @@ class FakeBank:
 
 
 class NessieBank(FakeBank):
-    """Same interface; balance, history and transfer creation go to Nessie.
+    """Same interface; account data and approved transfers go to Nessie.
+
+    What the live sandbox does (other teams' 2026 tests; verify with your key):
+      * base URL must be https://api.nessieisreal.com
+      * writes never change an account balance -> we keep a local ledger
+      * transfers may have no payee field -> payee goes in description "to:<payee> | memo"
+      * transfers need status/transaction_date/amount/description
 
     cloud/data/nessie_ids.json (written by cloud/seed_nessie.py):
       {"users": {"alex": "<account id>"}, "payees": {"landlord": "<account id>", ...},
-       "names": {"landlord": "Brookside Apartments", ...}, "known": ["landlord", ...]}
+       "names": {...}, "known": [...], "payee_field": false}
+    "payee_field": true only if Nessie accepted medium + payee_id in your curl test.
     """
 
     name = "nessie"
@@ -150,12 +171,54 @@ class NessieBank(FakeBank):
                       for p in ids["payees"]}
             accounts[uid] = _Account(0.0, [], payees, [])
         super().__init__(accounts, clock)
+        base = base.replace("http://", "https://", 1)  # plain http is refused by Nessie
         self._http = httpx.AsyncClient(base_url=base, params={"key": api_key}, timeout=10)
+        self._spent: dict[str, float] = {}  # local ledger: Nessie never lowers balances
+        self._hidden: set[str] = set()  # app transfers from before this start (reset couldn't delete them)
 
+    # ------------------------------------------------------------- helpers
+    @staticmethod
+    def _key(row: dict) -> str:
+        """Nessie's list responses may omit _id, so fall back to the row's contents."""
+        return str(row.get("_id") or row.get("id") or
+                   f'{row.get("amount")}|{row.get("description")}|{row.get("transaction_date")}|{row.get("status")}')
+
+    @staticmethod
+    def _ts(row: dict) -> float:
+        try:
+            return datetime.fromisoformat(str(row.get("transaction_date", ""))[:10]).timestamp()
+        except ValueError:
+            return 0.0
+
+    def _payee_of(self, row: dict, by_nessie_id: dict[str, str]) -> Optional[str]:
+        pid = by_nessie_id.get(row.get("payee_id") or "")
+        if pid:
+            return pid
+        desc = str(row.get("description", ""))
+        if desc.startswith("to:"):
+            cand = desc[3:].split(" |")[0].strip()
+            return cand if cand in self.ids["payees"] else None
+        return None
+
+    # ---------------------------------------------------------------- reads
     async def balance(self, user_id: str) -> float:
-        r = await self._http.get(f"/accounts/{self.ids['users'][user_id]}")
+        """Opening balance from Nessie minus every transfer this app made.
+
+        Nessie never lowers a balance, so we compute it. App transfers are the "to:"
+        transfers that are not the seeded history (see is_app_transfer). Survives restarts."""
+        acct = self.ids["users"][user_id]
+        r = await self._http.get(f"/accounts/{acct}")
         r.raise_for_status()
-        return float(r.json()["balance"])
+        opening = float(r.json()["balance"])
+        try:
+            t = await self._http.get(f"/accounts/{acct}/transfers", params={"type": "payer"})
+            t.raise_for_status()
+            sent = sum(float(x["amount"]) for x in t.json()
+                       if is_app_transfer(x) and self._key(x) not in self._hidden)
+        except Exception as exc:
+            log.warning("Nessie transfers read failed, using session ledger: %s", exc)
+            sent = self._spent.get(user_id, 0.0)
+        return round(opening - sent, 2)
 
     async def spend_history(self, user_id: str) -> list[float]:
         acct = self.ids["users"][user_id]
@@ -166,26 +229,101 @@ class NessieBank(FakeBank):
                 r = await self._http.get(path, params={"type": "payer"} if "transfers" in path else None)
                 r.raise_for_status()
                 rows = [x for x in r.json() if "amount" in x]
-            except Exception:
+            except Exception as exc:
+                log.warning("Nessie %s failed: %s", path, exc)
                 continue
             out += [float(x["amount"]) for x in rows]
             if "transfers" in path:  # rebuild per-payee history from Nessie
-                self._a(user_id).transfers = [
-                    TransferRecord(by_nessie_id[x["payee_id"]], float(x["amount"]), 0.0, x.get("description", ""), x.get("_id"))
-                    for x in rows if x.get("payee_id") in by_nessie_id]
+                recs = []
+                for x in rows:
+                    if self._key(x) in self._hidden:
+                        continue  # from an earlier demo run
+                    pid = self._payee_of(x, by_nessie_id)
+                    if pid:
+                        recs.append(TransferRecord(pid, float(x["amount"]), self._ts(x),
+                                                   x.get("description", ""), x.get("_id")))
+                # keep transfers made this session that Nessie may not list yet
+                seen = {t.nessie_id for t in recs if t.nessie_id}
+                recs += [t for t in self._a(user_id).transfers if t.nessie_id and t.nessie_id not in seen]
+                self._a(user_id).transfers = recs
         return out
 
+    # --------------------------------------------------------------- writes
     async def transfer(self, user_id: str, payee_id: str, amount: float, memo: str) -> TransferRecord:
+        if amount > await self.balance(user_id):
+            raise ValueError("insufficient funds")
         acct = self.ids["users"][user_id]
-        body = {"medium": "balance", "payee_id": self.ids["payees"][payee_id], "amount": amount,
-                "transaction_date": date.today().isoformat(), "description": memo or "ScamShield transfer"}
+        body = {"status": "pending", "amount": amount, "transaction_date": date.today().isoformat(),
+                "description": f"to:{payee_id} | {memo or 'ScamShield transfer'}"}
+        if self.ids.get("payee_field"):
+            body |= {"medium": "balance", "payee_id": self.ids["payees"][payee_id]}
         r = await self._http.post(f"/accounts/{acct}/transfers", json=body)
+        if r.status_code >= 400:
+            log.error("Nessie transfer rejected %s: %s", r.status_code, r.text[:300])
         r.raise_for_status()
         data = r.json()
         nid = (data.get("objectCreated") or {}).get("_id") if isinstance(data, dict) else None
         rec = TransferRecord(payee_id, amount, self.clock(), memo, nid)
         self._a(user_id).transfers.append(rec)
+        self._spent[user_id] = self._spent.get(user_id, 0.0) + amount
+        # mirror the money into the payee's account so it shows up on their side
+        # (Nessie transfers carry no payee, and balances never change either way)
+        try:
+            await self._http.post(f"/accounts/{self.ids['payees'][payee_id]}/deposits", json={
+                "medium": "balance", "amount": amount, "status": "completed",
+                "transaction_date": date.today().isoformat(),
+                "description": f"from:{user_id} | {memo or 'ScamShield transfer'}"})
+        except Exception as exc:
+            log.warning("Nessie deposit mirror failed: %s", exc)
         return rec
+
+    # ---------------------------------------------------------------- reset
+    async def reset(self) -> int:
+        """Delete every transfer this app made ("to:" description, not seed history)
+        and the mirrored deposits ("from:" description), so the demo starts fresh.
+        Seeded history (status "completed") is kept. Returns how many were deleted."""
+        deleted = 0
+        targets = [(acct, "transfers", "to:") for acct in self.ids["users"].values()]
+        targets += [(acct, "deposits", "from:") for acct in self.ids["payees"].values()]
+        for acct, kind, prefix in targets:
+            try:
+                # same listing the balance uses (type=payer), so the app's transfers are found
+                r = await self._http.get(f"/accounts/{acct}/{kind}",
+                                         params={"type": "payer"} if kind == "transfers" else None)
+                r.raise_for_status()
+                rows = r.json()
+            except Exception as exc:
+                log.warning("reset: listing %s on %s failed: %s", kind, acct, exc)
+                continue
+            log.info("reset: %s on %s -> %d rows %s", kind, acct, len(rows),
+                     [(x.get("status"), x.get("amount"), x.get("description")) for x in rows][:12])
+            for x in rows:
+                if kind == "transfers" and not is_app_transfer(x):
+                    continue  # keep seeded history
+                if kind == "deposits" and not str(x.get("description", "")).startswith(prefix):
+                    continue
+                ok = False
+                rid = x.get("_id") or x.get("id")
+                try:
+                    if not rid:
+                        raise ValueError("Nessie returned no id")
+                    d = await self._http.delete(f"/{kind}/{rid}")
+                    ok = d.status_code < 400
+                    if not ok:
+                        log.warning("reset: delete %s %s -> %s %s", kind, rid, d.status_code, d.text[:200])
+                except Exception as exc:
+                    log.info("reset: can't delete %s (%s); hiding it", kind, exc)
+                if ok:
+                    deleted += 1
+                else:
+                    self._hidden.add(self._key(x))  # can't delete: ignore it from now on
+        for uid in self.ids["users"]:
+            self._spent[uid] = 0.0
+            self._a(uid).transfers = []
+            for pid in self._a(uid).payees.values():
+                pid.known = pid.id in set(self.ids.get("known", []))
+        log.info("reset: deleted %d app-made Nessie records, hid %d others", deleted, len(self._hidden))
+        return deleted
 
 
 def make_bank(settings) -> Bank:
